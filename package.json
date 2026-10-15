@@ -9,7 +9,7 @@
     "verify": "node scripts/verify-all.js",
     "next:dev": "next dev",
     "next:start": "next start",
-    "build": "node -e \"console.log('Build OK')\"",
+    "build": "node -e \"const fs = require('fs'); if (!fs.existsSync('public')) fs.mkdirSync('public'); console.log('Build OK');\"",
     "lint": "next lint",
     "seed": "tsx scripts/seed.ts",
     "test:e2e": "tsx tests/e2e/run-all.ts"

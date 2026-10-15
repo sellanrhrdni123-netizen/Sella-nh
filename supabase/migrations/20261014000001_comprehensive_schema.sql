@@ -11,26 +11,7 @@ create extension if not exists "uuid-ossp";
 create extension if not exists "pgcrypto";
 
 -- ==============================================================================
--- 1. SECURITY DEFINER HELPER FUNCTION
--- ==============================================================================
-
-create or replace function public.is_superadmin()
-returns boolean
-language sql
-security definer
-set search_path = public
-stable
-as $$
-  select exists (
-    select 1
-    from public.profiles
-    where id = auth.uid()
-      and role in ('admin', 'superadmin')
-  );
-$$;
-
--- ==============================================================================
--- 2. TABLE DDL SPECIFICATIONS (ALL 14 TABLES)
+-- 1. EXTENSIONS & SETUP
 -- ==============================================================================
 
 -- ------------------------------------------------------------------------------
@@ -45,6 +26,10 @@ create table if not exists public.profiles (
   avatar_url text,
   default_currency text not null default 'IDR',
   currency text not null default 'IDR',
+  occupation text,
+  city text,
+  bio text,
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
   plan text not null default 'starter' check (plan in ('starter', 'pro')),
   role text not null default 'user' check (role in ('user', 'admin', 'superadmin')),
   telegram_chat_id bigint unique,
@@ -65,6 +50,10 @@ begin
   alter table public.profiles add column if not exists phone text;
   alter table public.profiles add column if not exists phone_verified boolean not null default false;
   alter table public.profiles add column if not exists default_currency text not null default 'IDR';
+  alter table public.profiles add column if not exists occupation text;
+  alter table public.profiles add column if not exists city text;
+  alter table public.profiles add column if not exists bio text;
+  alter table public.profiles add column if not exists status text not null default 'approved' check (status in ('pending', 'approved', 'rejected'));
   alter table public.profiles drop constraint if exists profiles_role_check;
   alter table public.profiles add constraint profiles_role_check check (role in ('user', 'admin', 'superadmin'));
   update public.profiles set phone = phone_number where phone is null and phone_number is not null;
@@ -440,6 +429,29 @@ alter table public.ai_providers enable row level security;
 alter table public.ai_logs enable row level security;
 alter table public.audit_logs enable row level security;
 alter table public.report_exports enable row level security;
+-- ==============================================================================
+-- 3.1. SECURITY DEFINER HELPER FUNCTION (is_superadmin)
+-- ==============================================================================
+
+create or replace function public.is_superadmin()
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+stable
+as $$
+begin
+  return exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and role in ('admin', 'superadmin')
+  );
+exception
+  when undefined_table then
+    return false;
+end;
+$$;
 
 -- 1. PROFILES
 drop policy if exists "Profiles SELECT policy" on public.profiles;
@@ -568,54 +580,66 @@ create policy "Report Exports ALL policy" on public.report_exports
 -- 4. SUPABASE STORAGE BUCKET (tatadana-exports) & STORAGE RLS
 -- ==============================================================================
 
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values (
-  'tatadana-exports',
-  'tatadana-exports',
-  false,
-  10485760,
-  array['application/pdf', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel']
-)
-on conflict (id) do update set
-  public = false,
-  file_size_limit = 10485760,
-  allowed_mime_types = array['application/pdf', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
+do $$
+begin
+  if exists (select 1 from information_schema.tables where table_schema = 'storage' and table_name = 'buckets') then
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values (
+      'tatadana-exports',
+      'tatadana-exports',
+      false,
+      10485760,
+      array['application/pdf', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel']
+    )
+    on conflict (id) do update set
+      public = false,
+      file_size_limit = 10485760,
+      allowed_mime_types = array['application/pdf', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
+  end if;
+end;
+$$;
 
-drop policy if exists "Users can access own export files" on storage.objects;
-create policy "Users can access own export files"
-on storage.objects for select
-using (
-  bucket_id = 'tatadana-exports'
-  and (
-    auth.uid()::text = split_part(name, '/', 2)
-    or auth.uid()::text = split_part(name, '/', 1)
-    or public.is_superadmin()
-  )
-);
+do $$
+begin
+  if exists (select 1 from information_schema.tables where table_schema = 'storage' and table_name = 'objects') then
+    drop policy if exists "Users can access own export files" on storage.objects;
+    create policy "Users can access own export files"
+    on storage.objects for select
+    using (
+      bucket_id = 'tatadana-exports'
+      and (
+        auth.uid()::text = split_part(name, '/', 2)
+        or auth.uid()::text = split_part(name, '/', 1)
+        or public.is_superadmin()
+      )
+    );
 
-drop policy if exists "Users can upload own export files" on storage.objects;
-create policy "Users can upload own export files"
-on storage.objects for insert
-with check (
-  bucket_id = 'tatadana-exports'
-  and (
-    auth.uid()::text = split_part(name, '/', 2)
-    or auth.uid()::text = split_part(name, '/', 1)
-    or public.is_superadmin()
-  )
-);
+    drop policy if exists "Users can upload own export files" on storage.objects;
+    create policy "Users can upload own export files"
+    on storage.objects for insert
+    with check (
+      bucket_id = 'tatadana-exports'
+      and (
+        auth.uid()::text = split_part(name, '/', 2)
+        or auth.uid()::text = split_part(name, '/', 1)
+        or public.is_superadmin()
+      )
+    );
 
-drop policy if exists "Users can delete own export files" on storage.objects;
-create policy "Users can delete own export files"
-on storage.objects for delete
-using (
-  bucket_id = 'tatadana-exports'
-  and (
-    auth.uid()::text = split_part(name, '/', 2)
-    or auth.uid()::text = split_part(name, '/', 1)
-    or public.is_superadmin()
-  )
-);
+    drop policy if exists "Users can delete own export files" on storage.objects;
+    create policy "Users can delete own export files"
+    on storage.objects for delete
+    using (
+      bucket_id = 'tatadana-exports'
+      and (
+        auth.uid()::text = split_part(name, '/', 2)
+        or auth.uid()::text = split_part(name, '/', 1)
+        or public.is_superadmin()
+      )
+    );
+  end if;
+end;
+$$;
 
 -- ==============================================================================
 -- 5. REALTIME PUBLICATION REGISTRATION
@@ -693,6 +717,7 @@ begin
     currency,
     plan,
     role,
+    status,
     created_at,
     updated_at
   )
@@ -705,7 +730,8 @@ begin
     'IDR',
     'IDR',
     coalesce(new.raw_user_meta_data->>'plan', 'starter'),
-    case when new.email = 'admin@tatadana.id' or new.raw_user_meta_data->>'role' in ('admin', 'superadmin') then 'superadmin' else 'user' end,
+    case when new.email = 'sellanrhrdni123@gmail.com' or new.email = 'admin@tatadana.id' or new.raw_user_meta_data->>'role' in ('admin', 'superadmin') then 'superadmin' else 'user' end,
+    case when new.email = 'sellanrhrdni123@gmail.com' or new.email = 'admin@tatadana.id' or new.raw_user_meta_data->>'role' in ('admin', 'superadmin') then 'approved' else 'pending' end,
     now(),
     now()
   )

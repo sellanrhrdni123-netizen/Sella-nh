@@ -67,7 +67,7 @@ const TUNNEL_URL = 'https://diff-previews-assessing-said.trycloudflare.com';
 // MASTER HTTP SERVER
 // ==============================================================================
 
-const server = http.createServer((req, res) => {
+function handleRequest(req, res) {
   const parsedUrl = url.parse(req.url, true);
   let pathname = parsedUrl.pathname || '/';
   if (pathname.length > 1 && pathname.endsWith('/')) {
@@ -1180,7 +1180,9 @@ const server = http.createServer((req, res) => {
     </body></html>
     `);
   }
-});
+}
+
+const server = http.createServer(handleRequest);
 
 process.on('uncaughtException', (err) => {
   console.error('Unhandled Exception:', err);
@@ -1190,19 +1192,24 @@ process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Rejection:', reason);
 });
 
-server.listen(PORT, HOST, () => {
-  const ips = getLocalIpAddresses();
-  console.log('================================================================');
-  console.log('🚀 TATADANA PRODUCTION SERVER ACTIVE & ONLINE');
-  console.log('================================================================');
-  console.log(`⭐ ALAMAT UTAMA TUNGGAL (ONE SINGLE LOCALHOST):`);
-  console.log(`👉 http://localhost:${PORT}`);
-  console.log(`   (Akses instan seluruh 11 fitur via Tab Switcher: Landing, Portal,`);
-  console.log(`    Dashboard, Transaksi, Laporan, Budget, Dompet, AI Chat, Settings,`);
-  console.log(`    Admin Console, & Telegram Bot Simulator)`);
-  console.log('----------------------------------------------------------------');
-  if (ips.length > 0) {
-    console.log(`📱 Akses Perangkat Lain (Wi-Fi): http://${ips[0].address}:${PORT}`);
-  }
-  console.log('================================================================');
-});
+if (require.main === module) {
+  server.listen(PORT, HOST, () => {
+    const ips = getLocalIpAddresses();
+    console.log('================================================================');
+    console.log('🚀 TATADANA PRODUCTION SERVER ACTIVE & ONLINE');
+    console.log('================================================================');
+    console.log(`⭐ ALAMAT UTAMA TUNGGAL (ONE SINGLE LOCALHOST):`);
+    console.log(`👉 http://localhost:${PORT}`);
+    console.log(`   (Akses instan seluruh 11 fitur via Tab Switcher: Landing, Portal,`);
+    console.log(`    Dashboard, Transaksi, Laporan, Budget, Dompet, AI Chat, Settings,`);
+    console.log(`    Admin Console, & Telegram Bot Simulator)`);
+    console.log('----------------------------------------------------------------');
+    if (ips.length > 0) {
+      console.log(`📱 Akses Perangkat Lain (Wi-Fi): http://${ips[0].address}:${PORT}`);
+    }
+    console.log('================================================================');
+  });
+}
+
+module.exports = handleRequest;
+module.exports.server = server;
